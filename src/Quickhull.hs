@@ -60,31 +60,58 @@ initialPartition :: Acc (Vector Point) -> Acc SegmentedPoints
 initialPartition points =
   let
       p1, p2 :: Exp Point
-      p1 = error "TODO: locate the left-most point"
-      p2 = error "TODO: locate the right-most point"
+      p1 = the $ fold1 (\a b -> fst a < fst b ? (a, b)) points
+      p2 = the $ fold1 (\a b -> fst a > fst b ? (a, b)) points
 
       isUpper :: Acc (Vector Bool)
-      isUpper = error "TODO: determine which points lie above the line (p₁, p₂)"
+      isUpper = map (\p -> p /= p1 && p /= p2 && pointIsLeftOfLine (T2 p1 p2) p) points
 
       isLower :: Acc (Vector Bool)
-      isLower = error "TODO: determine which points lie below the line (p₁, p₂)"
+      isLower = map (\p -> p /= p1 && p /= p2 && pointIsLeftOfLine (T2 p2 p1) p) points
 
       offsetUpper :: Acc (Vector Int)
       countUpper  :: Acc (Scalar Int)
-      T2 offsetUpper countUpper = error "TODO: number of points above the line and their relative index"
+      T2 offsetUpper countUpper = 
+        let boolToInt = map (\b -> b ? (1, 0)) isUpper
+            offsets = prescanl (+) 0 boolToInt
+            count = fold (+) 0 boolToInt
+        in T2 offsets count
 
       offsetLower :: Acc (Vector Int)
       countLower  :: Acc (Scalar Int)
-      T2 offsetLower countLower = error "TODO: number of points below the line and their relative index"
+      T2 offsetLower countLower = 
+        let boolToInt = map (\b -> b ? (1, 0)) isLower
+            offsets = prescanl (+) 0 boolToInt
+            count = fold (+) 0 boolToInt
+        in T2 offsets count
 
       destination :: Acc (Vector (Maybe DIM1))
-      destination = error "TODO: compute the index in the result array for each point (if it is present)"
+      destination = generate (shape points) $ \ix ->
+        let i = unindex1 ix
+        in isUpper ! ix ? (Just_ (index1 (1 + offsetUpper ! ix)),
+          isLower ! ix ? (Just_ (index1 (2 + the countUpper + offsetLower ! ix)),
+          Nothing_))
 
       newPoints :: Acc (Vector Point)
-      newPoints = error "TODO: place each point into its corresponding segment of the result"
+      newPoints = permute 
+        const
+        (fill (index1 (3 + the countUpper + the countLower)) p1) -- Initialize with p1
+        (\ix -> let i = unindex1 ix
+          in i == 1 + the countUpper  -- p2 position
+             ? (Just_ (index1 1),      -- index of p2 in input
+             destination ! ix))        -- other points
+        points
 
       headFlags :: Acc (Vector Bool)
-      headFlags = error "TODO: create head flags array demarcating the initial segments"
+      headFlags = permute 
+        (||)
+        (fill (index1 (3 + the countUpper + the countLower)) (constant False))
+        (\ix -> let i = unindex1 ix
+          in (i == 0 ||                            -- Start (p1)
+              i == (1 + the countUpper) ||         -- Middle (p2)
+              i == (2 + the countUpper + the countLower)) -- End (p1)
+             ? (Just_ ix, Nothing_))
+        (fill (index1 1) (constant True))
   in
   T2 headFlags newPoints
 
