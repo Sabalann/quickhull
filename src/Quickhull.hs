@@ -121,16 +121,43 @@ propagateR :: Elt a => Acc (Vector Bool) -> Acc (Vector a) -> Acc (Vector a)
 propagateR = error "TODO: propagateR"
 
 shiftHeadFlagsL :: Acc (Vector Bool) -> Acc (Vector Bool)
-shiftHeadFlagsL = error "TODO: shiftHeadFlagsL"
+shiftHeadFlagsL flags = 
+    generate (shape flags) (\ix -> 
+        let i = unindex1 ix
+        in i == (size flags - 1) ? 
+           (constant True, 
+            flags ! (index1 (i + 1))))
 
 shiftHeadFlagsR :: Acc (Vector Bool) -> Acc (Vector Bool)
-shiftHeadFlagsR = error "TODO: shiftHeadFlagsR"
+shiftHeadFlagsR flags = 
+    generate (shape flags) (\ix -> 
+        let i = unindex1 ix
+        in i == 0 ? 
+           (constant True, 
+            flags ! (index1 (i - 1))))
 
 segmentedScanl1 :: Elt a => (Exp a -> Exp a -> Exp a) -> Acc (Vector Bool) -> Acc (Vector a) -> Acc (Vector a)
-segmentedScanl1 = error "TODO: segmentedScanl1"
+segmentedScanl1 f flags arr = 
+    -- Extract just the values from the scan result, using prescanl1 instead
+    let pairs = zipWith (\flag val -> T2 flag val) flags arr
+        -- Segment operation that applies f to values and respects segment boundaries
+        segOp = \(T2 f1 v1) (T2 f2 v2) -> 
+            T2 (f1 || f2) 
+               (f2 ? (v2, f v1 v2))
+    in
+    -- Perform inclusive scan using segmented operator
+    map (\(T2 _ v) -> v) (scanl1 segOp pairs)
 
 segmentedScanr1 :: Elt a => (Exp a -> Exp a -> Exp a) -> Acc (Vector Bool) -> Acc (Vector a) -> Acc (Vector a)
-segmentedScanr1 = error "TODO: segmentedScanr1"
+segmentedScanr1 f flags arr = 
+    let pairs = zipWith (\flag val -> T2 flag val) flags arr
+        -- Segment operation that applies f to values and respects segment boundaries
+        segOp = \(T2 f1 v1) (T2 f2 v2) -> 
+            T2 (f1 || f2) 
+               (f1 ? (v1, f v1 v2))
+    in
+    -- Perform inclusive scan from right using segmented operator
+    map (\(T2 _ v) -> v) (scanr1 segOp pairs)
 
 
 -- Given utility functions
