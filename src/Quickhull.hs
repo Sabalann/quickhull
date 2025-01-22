@@ -115,22 +115,63 @@ quickhull =
 -- ----------------
 
 propagateL :: Elt a => Acc (Vector Bool) -> Acc (Vector a) -> Acc (Vector a)
-propagateL = error "TODO: propagateL"
+propagateL flags values = 
+    -- Use segmentedScanl1 to copy rightward within segments
+    -- We copy each value marked with True to all following positions until next True
+    segmentedScanl1 (\x y -> x) flags values
 
 propagateR :: Elt a => Acc (Vector Bool) -> Acc (Vector a) -> Acc (Vector a)
-propagateR = error "TODO: propagateR"
+propagateR flags values = 
+    -- Use segmentedScanr1 to copy leftward within segments
+    -- We copy each value marked with True to all preceding positions until next True
+    segmentedScanr1 (\x y -> y) flags values
 
 shiftHeadFlagsL :: Acc (Vector Bool) -> Acc (Vector Bool)
-shiftHeadFlagsL = error "TODO: shiftHeadFlagsL"
+shiftHeadFlagsL flags = 
+    generate (shape flags) (\ix -> 
+        let i = unindex1 ix
+        in i == (size flags - 1) ? 
+           (constant False, 
+            flags ! (index1 (i + 1))))
 
 shiftHeadFlagsR :: Acc (Vector Bool) -> Acc (Vector Bool)
-shiftHeadFlagsR = error "TODO: shiftHeadFlagsR"
+shiftHeadFlagsR flags = 
+    generate (shape flags) (\ix -> 
+        let i = unindex1 ix
+        in i == 0 ? 
+           (constant False, 
+            flags ! (index1 (i - 1))))
 
 segmentedScanl1 :: Elt a => (Exp a -> Exp a -> Exp a) -> Acc (Vector Bool) -> Acc (Vector a) -> Acc (Vector a)
-segmentedScanl1 = error "TODO: segmentedScanl1"
+segmentedScanl1 f flags arr = 
+    -- First create tuples of (flag, value) for segmented processing
+    let pairs = zipWith (\flag val -> T2 flag val) flags arr
+        
+        -- Helper for segmented operation
+        segOp = segmented f
+        
+        -- Perform scan using segmented operator
+        scanned = prescanl segOp (T2 (constant True) (arr ! (index1 0))) pairs
+    in
+    -- Extract just the values from the result
+    map (\(T2 _ v) -> v) scanned
 
 segmentedScanr1 :: Elt a => (Exp a -> Exp a -> Exp a) -> Acc (Vector Bool) -> Acc (Vector a) -> Acc (Vector a)
-segmentedScanr1 = error "TODO: segmentedScanr1"
+segmentedScanr1 f flags arr = 
+    -- First create tuples of (flag, value) for segmented processing
+    let pairs = zipWith (\flag val -> T2 flag val) flags arr
+        
+        -- Helper for segmented operation
+        segOp = segmented f
+        
+        -- Get last element for initial value
+        lastIdx = size arr - 1
+        
+        -- Perform scan using segmented operator
+        scanned = prescanr segOp (T2 (constant True) (arr ! (index1 lastIdx))) pairs
+    in
+    -- Extract just the values from the result
+    map (\(T2 _ v) -> v) scanned
 
 
 -- Given utility functions
