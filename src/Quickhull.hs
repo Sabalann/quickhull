@@ -115,10 +115,42 @@ quickhull =
 -- ----------------
 
 propagateL :: Elt a => Acc (Vector Bool) -> Acc (Vector a) -> Acc (Vector a)
-propagateL = error "TODO: propagateL"
+propagateL flags values =
+  let
+    -- Combine flags and values for scanning
+    combined = zip values flags
+    
+    -- Scan left keeping last True value
+    scanned = scanl1 
+      (\prev curr -> 
+        let T2 prevVal _ = unlift prev
+            T2 currVal currFlag = unlift curr
+        in currFlag ? (curr, T2 prevVal currFlag))
+      combined
+      
+    -- Extract final values
+    result = map fst scanned
+  in
+  result
 
 propagateR :: Elt a => Acc (Vector Bool) -> Acc (Vector a) -> Acc (Vector a)
-propagateR = error "TODO: propagateR"
+propagateR flags values =
+  let
+    -- Combine flags and values for scanning
+    combined = zip values flags
+    
+    -- Scan right keeping last True value
+    scanned = scanr1 
+      (\curr prev -> 
+        let T2 prevVal _ = unlift prev
+            T2 currVal currFlag = unlift curr
+        in currFlag ? (curr, T2 prevVal currFlag))
+      combined
+      
+    -- Extract final values
+    result = map fst scanned
+  in
+  result
 
 shiftHeadFlagsL :: Acc (Vector Bool) -> Acc (Vector Bool)
 shiftHeadFlagsL flags = 
