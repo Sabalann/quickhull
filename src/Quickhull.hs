@@ -59,7 +59,7 @@ type SegmentedPoints = (Vector Bool, Vector Point)
 initialPartition :: Acc (Vector Point) -> Acc SegmentedPoints
 initialPartition points =
   let
-      -- Find leftmost and rightmost points
+      -- determine letfmost and rightmost points
       p1, p2 :: Exp Point
       p1 = the $ fold1 (\a b -> 
           fst a < fst b ? (a, 
@@ -70,62 +70,59 @@ initialPartition points =
           fst a == fst b ? (snd a >= snd b ? (a, b), b)
           )) points
 
-      -- Carefully separate points above and below the line
-      -- Note: points exactly on the line are excluded
+      -- find points above line
       isUpper :: Acc (Vector Bool)
       isUpper = map (\p -> 
           p /= p1 && p /= p2 && 
           pointIsLeftOfLine (T2 p1 p2) p
         ) points
 
+      -- find points below line
       isLower :: Acc (Vector Bool)
       isLower = map (\p -> 
           p /= p1 && p /= p2 && 
           pointIsLeftOfLine (T2 p2 p1) p
         ) points
 
-      -- Count points in upper and lower segments
-      upperCount :: Acc (Scalar Int)
-      upperCount = fold (+) 0 (map (\b -> b ? (1, 0)) isUpper)
+      -- count points above and below line
+      countUpper :: Acc (Scalar Int)
+      countUpper = fold (+) 0 (map (\b -> b ? (1, 0)) isUpper)
 
-      lowerCount :: Acc (Scalar Int)
-      lowerCount = fold (+) 0 (map (\b -> b ? (1, 0)) isLower)
+      countLower :: Acc (Scalar Int)
+      countLower = fold (+) 0 (map (\b -> b ? (1, 0)) isLower)
 
-      -- Total output size: p1 + upper points + p2 + lower points + p1
-      totalSize = 3 + the upperCount + the lowerCount
+      -- p1 + upper points + p2 + lower points + p1
+      totalSize = 3 + the countUpper + the countLower
 
-      -- Compute destination indices for points
-      destinations :: Acc (Vector Int)
-      destinations = generate (shape points) $ \ix ->
+      -- compute index in the result array
+      destination :: Acc (Vector (Maybe DIM1))
+      destination = generate (shape points) $ \ix ->
         let 
-            i = unindex1 ix
             point = points ! ix
             upperOffset = prescanl (+) 0 (map (\b -> b ? (1, 0)) isUpper)
             lowerOffset = prescanl (+) 0 (map (\b -> b ? (1, 0)) isLower)
         in
-        point == p1 ? (0,                             -- First p1 goes first
-            point == p2 ? (1 + the upperCount,        -- p2 goes after upper points
-            isUpper ! ix ? (1 + upperOffset ! ix,     -- Upper points after p1 
-            isLower ! ix ? (2 + the upperCount + lowerOffset ! ix, -1)  -- Lower points after p2
+        point == p1 ? (Just_ (index1 0),                              -- p1 goes first
+            point == p2 ? (Just_ (index1 (1 + the countUpper)),       -- p2 goes after upper points
+            isUpper ! ix ? (Just_ (index1 (1 + upperOffset ! ix)),    -- upper points after p1
+            isLower ! ix ? (Just_ (index1 (2 + the countUpper + lowerOffset ! ix)), 
+            Nothing_)  -- invalid points
             )))
 
-      -- Create points array with careful positioning
+      -- new points array
       newPoints :: Acc (Vector Point)
       newPoints = permute 
         const
-        (fill (index1 totalSize) p1)  -- Initialize all with p1
-        (\ix -> destinations ! ix /= -1 
-            ? (Just_ (index1 (destinations ! ix)), 
-               Nothing_))
+        (fill (index1 totalSize) p1) 
+        (destination !)  -- use destination indices
         points
 
-      -- Create head flags marking segment boundaries
+      -- head flags marking segment boundaries
       headFlags :: Acc (Vector Bool)
       headFlags = generate (index1 totalSize) $ \(I1 i) ->
-        i == 0 ||                                     -- Start (first p1)
-        i == 1 + the upperCount ||                    -- Middle (p2)
-        i == totalSize - 1                            -- End (last p1)
-
+        i == 0 ||                   -- first p1
+        i == 1 + the countUpper ||  -- p2
+        i == totalSize - 1          -- last p1
   in
   T2 headFlags newPoints
 
@@ -214,34 +211,25 @@ quickhull =
 -- Helper functions
 -- ----------------
 
--- Get first element of vector
-indexHead :: Elt a => Acc (Vector a) -> Exp a
-indexHead arr = arr ! index1 0
-
--- Get last element of vector
-indexLast :: Elt a => Acc (Vector a) -> Exp a
-indexLast arr = arr ! index1 (size arr - 1)
-
 rotate1 :: Elt a => Acc (Vector a) -> Acc (Vector a)
 rotate1 arr = generate (shape arr) (\ix ->
     let i = unindex1 ix
-    in i == 0 ? (arr ! (index1 (size arr - 1)), arr ! (index1 (i - 1))))
+    in i == 0 ? (arr ! index1 (size arr - 1), arr ! index1 (i - 1)))
 
 propagateL :: Elt a => Acc (Vector Bool) -> Acc (Vector a) -> Acc (Vector a)
 propagateL flags values =
   let
-    -- Combine flags and values for scanning
+    -- combine flags and values
     combined = zip values flags
     
-    -- Scan left keeping last True value
+    -- keep last true from the left
     scanned = scanl1 
       (\prev curr -> 
         let T2 prevVal _ = unlift prev
-            T2 currVal currFlag = unlift curr
+            T2 _ currFlag = unlift curr
         in currFlag ? (curr, T2 prevVal currFlag))
       combined
       
-    -- Extract final values
     result = map fst scanned
   in
   result
@@ -249,18 +237,17 @@ propagateL flags values =
 propagateR :: Elt a => Acc (Vector Bool) -> Acc (Vector a) -> Acc (Vector a)
 propagateR flags values =
   let
-    -- Combine flags and values for scanning
+    -- combine flags and values
     combined = zip values flags
     
-    -- Scan right keeping last True value
+    -- keep last true from the right
     scanned = scanr1 
       (\curr prev -> 
         let T2 prevVal _ = unlift prev
-            T2 currVal currFlag = unlift curr
+            T2 _ currFlag = unlift curr
         in currFlag ? (curr, T2 prevVal currFlag))
       combined
       
-    -- Extract final values
     result = map fst scanned
   in
   result
@@ -271,7 +258,7 @@ shiftHeadFlagsL flags =
         let i = unindex1 ix
         in i == (size flags - 1) ? 
            (constant True, 
-            flags ! (index1 (i + 1))))
+            flags ! index1 (i + 1)))
 
 shiftHeadFlagsR :: Acc (Vector Bool) -> Acc (Vector Bool)
 shiftHeadFlagsR flags = 
@@ -279,30 +266,23 @@ shiftHeadFlagsR flags =
         let i = unindex1 ix
         in i == 0 ? 
            (constant True, 
-            flags ! (index1 (i - 1))))
+            flags ! index1 (i - 1)))
 
 segmentedScanl1 :: Elt a => (Exp a -> Exp a -> Exp a) -> Acc (Vector Bool) -> Acc (Vector a) -> Acc (Vector a)
 segmentedScanl1 f flags arr = 
-    -- Extract just the values from the scan result, using prescanl1 instead
-    let pairs = zipWith (\flag val -> T2 flag val) flags arr
-        -- Segment operation that applies f to values and respects segment boundaries
-        segOp = \(T2 f1 v1) (T2 f2 v2) -> 
-            T2 (f1 || f2) 
-               (f2 ? (v2, f v1 v2))
-    in
-    -- Perform inclusive scan using segmented operator
-    map (\(T2 _ v) -> v) (scanl1 segOp pairs)
+    let pairs = zipWith T2 flags arr
+    in map (\(T2 _ v) -> v) (scanl1 (segmented f) pairs)
 
 segmentedScanr1 :: Elt a => (Exp a -> Exp a -> Exp a) -> Acc (Vector Bool) -> Acc (Vector a) -> Acc (Vector a)
-segmentedScanr1 f flags arr = 
-    let pairs = zipWith (\flag val -> T2 flag val) flags arr
-        -- Segment operation that applies f to values and respects segment boundaries
-        segOp = \(T2 f1 v1) (T2 f2 v2) -> 
-            T2 (f1 || f2) 
-               (f1 ? (v1, f v1 v2))
-    in
-    -- Perform inclusive scan from right using segmented operator
-    map (\(T2 _ v) -> v) (scanr1 segOp pairs)
+segmentedScanr1 f flags arr =
+    let 
+        -- reverse flags and array
+        revFlags = reverse flags
+        revArr   = reverse arr
+
+        pairs = zipWith T2 revFlags revArr
+        scanned = scanl1 (segmented f) pairs
+    in reverse $ map (\(T2 _ v) -> v) scanned -- reverse back to original
 
 
 -- Given utility functions
